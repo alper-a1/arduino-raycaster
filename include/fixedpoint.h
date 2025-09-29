@@ -13,19 +13,88 @@
 using fixed_q7_8 = int16_t;
 constexpr uint8_t Q7_8_SHIFT = 8;
 constexpr fixed_q7_8 Q7_8_ONE = (1 << Q7_8_SHIFT); 
-
-
-inline fixed_q7_8 q7_8_mult(fixed_q7_8 a, fixed_q7_8 b);
-
-// if b is zero this is unsafe
-inline fixed_q7_8 q7_8_div(fixed_q7_8 a, fixed_q7_8 b);
+constexpr fixed_q7_8 Q7_8_MAX = 32767; // 127.99609375
+constexpr fixed_q7_8 Q7_8_MIN = -32768; // -128
 
 // PROGMEM this ?
 constexpr uint8_t sinTable[] = {0, 4, 9, 13, 18, 22, 27, 31, 35, 40, 44, 49, 53, 57, 62, 66, 70, 75, 79, 83, 87, 91, 96, 100, 104, 108, 112, 116, 120, 124, 127, 131, 135, 139, 143, 146, 150, 153, 157, 160, 164, 167, 171, 174, 177, 180, 183, 186, 190, 192, 195, 198, 201, 204, 206, 209, 211, 214, 216, 219, 221, 223, 225, 227, 229, 231, 233, 235, 236, 238, 240, 241, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 253, 254, 254, 254, 255, 255, 255, 255};
 
-inline fixed_q7_8 sin_q7_8(fixed_q7_8 angleDeg);
+inline fixed_q7_8 sin_q7_8(fixed_q7_8 angleDeg) {
+    // get only the int part of the degree
+    int16_t angleInt = angleDeg >> Q7_8_SHIFT; 
+    
+    angleInt %= 360;
+    if (angleInt < 0) angleInt += 360;
 
-inline fixed_q7_8 cos_q7_8(fixed_q7_8 angleDeg);
+    uint8_t lookupIndex;
+    int8_t sign = 1; // 1 for positive, -1 for negative
 
+    if (angleInt >= 0 && angleInt <= 90) {
+        lookupIndex = angleInt;
+
+    } else if (angleInt > 90 && angleInt <= 180) {
+        lookupIndex = 180 - angleInt;
+
+    } else if (angleInt > 180 && angleInt <= 270) {
+        lookupIndex = angleInt - 180;
+        sign = -1;
+
+    } else { // angleInt > 270 and <= 360
+        lookupIndex = 360 - angleInt;
+        sign = -1;
+    }
+
+    // Lookup the value and apply the sign
+    return (sinTable[lookupIndex] * sign) << Q7_8_SHIFT;
+}
+
+inline fixed_q7_8 cos_q7_8(fixed_q7_8 angleDeg) {
+    return sin_q7_8((90 << Q7_8_SHIFT) - angleDeg);
+}
+
+inline fixed_q7_8 q7_8_mult(fixed_q7_8 a, fixed_q7_8 b) {
+    return (fixed_q7_8)(((int32_t)a * b) >> Q7_8_SHIFT);
+}
+
+inline fixed_q7_8 q7_8_div(fixed_q7_8 a, fixed_q7_8 b) {
+    if (b == 0) return Q7_8_MAX; // avoid division by zero
+
+    int32_t result = ((int32_t)a << Q7_8_SHIFT) / b;
+    
+    if (result > Q7_8_MAX) return Q7_8_MAX; // clamp to max value if overflow
+    if (result < Q7_8_MIN) return Q7_8_MIN; // clamp to min value if underflow
+
+    return (fixed_q7_8)result;
+}
+
+// if the numerator is a 32bit int, use this version to avoid overflow in intermediate calculations
+inline fixed_q7_8 q7_8_div_32b(int32_t a, fixed_q7_8 b) {
+    if (b == 0) return Q7_8_MAX; // avoid division by zero
+
+    int32_t result = (a << Q7_8_SHIFT) / b;
+    
+    if (result > Q7_8_MAX) return Q7_8_MAX; // clamp to max value if overflow
+    if (result < Q7_8_MIN) return Q7_8_MIN; // clamp to min value if underflow
+
+    return (fixed_q7_8)result;
+}
+
+// like q7_8_div but always returns a positive result, needed for cases where large values of a and/or b can cause overflow in intermediate calculations
+inline fixed_q7_8 q7_8_div_abs(fixed_q7_8 a, fixed_q7_8 b) {
+    if (b == 0) return Q7_8_MAX; // avoid division by zero
+
+    // this is a specific case where we want the absolute value of the result in case the 32bit intermediate is truncated to 0 in 16bit
+    // eg, if result is 0xFFFF0000 due to being large and b being small, normal division would truncate to 0 in 16bit, but abs would make it 0x00010000 which when truncated to 16bit becomes 1
+    // this is needed for the raycaster to avoid issues with very small deltaDist values causing
+    int32_t result = abs(((int32_t)a << Q7_8_SHIFT) / b);
+    
+    if (result > Q7_8_MAX) return Q7_8_MAX; // clamp to max value if overflow
+
+    return (fixed_q7_8)result;
+}
+
+inline fixed_q7_8 double_to_q7_8(double val) {
+    return (fixed_q7_8)(val * Q7_8_ONE);
+}
 
 #endif
