@@ -5,7 +5,7 @@
 
 #include <fixedpoint.h>
 
-#define PROFILING
+// #define PROFILING
 
 
 // tft screen init
@@ -54,10 +54,9 @@ const Fixed16_16 moveStep(0.05);
 constexpr uint8_t moveDelay = 50; // ms
 unsigned long lastMoveTime = 0;
 
-// constexpr uint8_t rotStepDeg = 255;
-// const fixed_q7_8 rosin = 4;
-// const fixed_q7_8 rocos = 256;
-
+const Fixed16_16 rosin = sin_q7_8(Fixed16_16(2));
+const Fixed16_16 rocos = cos_q7_8(Fixed16_16(2));
+const Fixed16_16 FOV_SCALE = Fixed16_16(0.66667);
 
 Fixed16_16 dirX(-1); 
 Fixed16_16 dirY; 
@@ -116,7 +115,6 @@ void loop() {
         sideDistY = (mapY + 1 - posY) * deltaDistY;
     }
 
-    uint8_t outOfBounds = 0;
     // finally start DDA loop
     while (hit == 0) {
         if (sideDistX < sideDistY) {
@@ -129,13 +127,8 @@ void loop() {
             side = 1;
         }
 
-
-        if (mapX < 0 || mapX >= 10 || mapY < 0 || mapY >= 10) {
-            hit = 1; // Stop the ray if it goes out of bounds
-            // Make perpwallDist very large so no wall is drawn
-            outOfBounds = 1;
-        } else if (worldMap[mapX][mapY] > 0) {
-        hit = 1;
+        if (worldMap[mapX][mapY] > 0) {
+            hit = 1;
         }
     }
 
@@ -148,13 +141,12 @@ void loop() {
         perpwallDist = sideDistY - deltaDistY;
     }
 
-    if (perpwallDist == 0) perpwallDist = 1; // avoid division by zero 
-    if (outOfBounds) perpwallDist = INT32_MAX; // if out of bounds, set very far distance
 
     // drawing the actual raycaster line
     // height of the screen is 128, which is the max we can hold in a fixed16_8
     // uint8_t lineHeight = q7_8_div(Q7_8_MAX, perpwallDist) >> Q7_8_SHIFT;
-    uint8_t lineHeight = (screenHeight / perpwallDist).toInt();
+    int16_t lineHeight = (screenHeight / perpwallDist).toInt();
+    if (lineHeight > screenHeight) lineHeight = screenHeight; // clamp to screen height
 
     uint8_t lineStart = (-lineHeight / 2) + (screenHeight / 2);
     if (lineStart < 0) lineStart = 0; 
@@ -184,64 +176,43 @@ void loop() {
         lastMoveTime = millis();
 
         if (digitalRead(BTN_FWRD) == HIGH) {
-            if (worldMap[(posX + dirX * moveStep).toInt()][posY.toInt()] == 0) {
+            if (worldMap[(posX + dirX * 10 * moveStep).toInt()][posY.toInt()] == 0) {
                 posX += dirX * moveStep;
             }
-            if (worldMap[posX.toInt()][(posY + dirY * moveStep).toInt()] == 0) {
+            if (worldMap[posX.toInt()][(posY + dirY * 10 * moveStep).toInt()] == 0) {
                 posY += dirY * moveStep;
             }
 
         } else if (digitalRead(BTN_BWRD) == HIGH) {
-            if (worldMap[(posX - dirX * moveStep).toInt()][posY.toInt()] == 0) {
+            if (worldMap[(posX - dirX * 10 * moveStep).toInt()][posY.toInt()] == 0) {
                 posX -= dirX * moveStep;
             }
-            if (worldMap[posX.toInt()][(posY - dirY * moveStep).toInt()] == 0) {
+            if (worldMap[posX.toInt()][(posY - dirY * 10 * moveStep).toInt()] == 0) {
                 posY -= dirY * moveStep;
             }
         }
         
         if (digitalRead(BTN_LFT) == HIGH) {
-            // int16_t oldDirX = dirX;
-            // int16_t oldDirY = dirY;
+            Fixed16_16 oldDirX = dirX;
+            Fixed16_16 oldDirY = dirY;
 
-            // // Perform rotation using 32-bit integers to prevent overflow
-            // int32_t temp_dir_x = ((int32_t)oldDirX * rocos) - ((int32_t)oldDirY * rosin);
-            // int32_t temp_dir_y = ((int32_t)oldDirX * rosin) + ((int32_t)oldDirY * rocos);
+            // Perform rotation using 32-bit integers to prevent overflow
+            dirX = oldDirX * rocos - oldDirY * rosin;
+            dirY = oldDirX * rosin + oldDirY * rocos;
 
-            // // Scale the 32-bit result back down to Q7.8 (16-bit) format
-            // dirX = (fixed_q7_8)(temp_dir_x >> Q7_8_SHIFT);
-            // dirY = (fixed_q7_8)(temp_dir_y >> Q7_8_SHIFT);
+            planeX = -dirY * FOV_SCALE;
+            planeY = dirX * FOV_SCALE;
 
-            // // --- Rotate Camera Plane Vector ---
-            
-            // const fixed_q7_8 FOV_SCALE = 166; // double_to_q7_8(0.66)
-
-            // planeX = q7_8_mult(-dirY, FOV_SCALE);
-            // planeY = q7_8_mult(dirX, FOV_SCALE);
-
-            // --- Normalize BOTH Vectors ---
-            
-            // This step is crucial to prevent long-term degradation.
-            // The bug might be in this function if the rotation code above is correct.
-            // normalise_2d_q7_8(&dirX, &dirY);
         } else if (digitalRead(BTN_RGHT) == HIGH) {
-            // int16_t oldDirX = dirX;
-            // int16_t oldDirY = dirY;
+            Fixed16_16 oldDirX = dirX;
+            Fixed16_16 oldDirY = dirY;
 
-            // // Perform rotation using 32-bit integers to prevent overflow
-            // int32_t temp_dir_x = ((int32_t)oldDirX * -rocos) - ((int32_t)oldDirY * -rosin);
-            // int32_t temp_dir_y = ((int32_t)oldDirX * -rosin) + ((int32_t)oldDirY * -rocos);
+            // Perform rotation using 32-bit integers to prevent overflow
+            dirX = oldDirX * rocos + oldDirY * rosin;
+            dirY = -oldDirX * rosin + oldDirY * rocos;
 
-            // // Scale the 32-bit result back down to Q7.8 (16-bit) format
-            // dirX = (fixed_q7_8)(temp_dir_x >> Q7_8_SHIFT);
-            // dirY = (fixed_q7_8)(temp_dir_y >> Q7_8_SHIFT);
-
-            // // --- Rotate Camera Plane Vector ---
-            
-            // const fixed_q7_8 FOV_SCALE = 166; // double_to_q7_8(0.66)
-
-            // planeX = q7_8_mult(-dirY, FOV_SCALE);
-            // planeY = q7_8_mult(dirX, FOV_SCALE);
+            planeX = -dirY * FOV_SCALE;
+            planeY = dirX * FOV_SCALE;
         }
     }
     
