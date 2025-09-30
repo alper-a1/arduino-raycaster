@@ -5,7 +5,7 @@
 
 #include <fixedpoint.h>
 
-// #define PROFILING
+#define PROFILING
 
 
 // tft screen init
@@ -22,6 +22,11 @@ void setup() {
     tft.initR(INITR_GREENTAB);
     tft.fillScreen(ST7735_BLACK); 
     tft.setRotation(1); // landscape mode
+
+
+    Fixed16_16 pl(0.66666667); 
+    Serial.print("PlaneY: "); Serial.println(pl.toRaw());
+
 }
 
 constexpr uint8_t screenWidth = 160;
@@ -40,22 +45,25 @@ constexpr uint8_t worldMap[10][10] =
   {1,1,1,1,1,1,1,1,1,1}
 };
 
-fixed_q7_8 posX = 4 << Q7_8_SHIFT;
-fixed_q7_8 posY = 4 << Q7_8_SHIFT;  
+
+Fixed16_16 posX(6);
+Fixed16_16 posY(2);
+
 // movement & rotation
-const fixed_q7_8 moveStep = double_to_q7_8(0.05);
+const Fixed16_16 moveStep(0.05);
 constexpr uint8_t moveDelay = 50; // ms
 unsigned long lastMoveTime = 0;
 
-constexpr uint8_t rotStepDeg = 255;
-const fixed_q7_8 rosin = 4;
-const fixed_q7_8 rocos = 256;
+// constexpr uint8_t rotStepDeg = 255;
+// const fixed_q7_8 rosin = 4;
+// const fixed_q7_8 rocos = 256;
 
-fixed_q7_8 dirX = -1 << Q7_8_SHIFT; 
-fixed_q7_8 dirY = 0 << Q7_8_SHIFT;
 
-fixed_q7_8 planeX = 0;
-fixed_q7_8 planeY = double_to_q7_8(0.66);
+Fixed16_16 dirX(-1); 
+Fixed16_16 dirY; 
+ 
+Fixed16_16 planeX; 
+Fixed16_16 planeY(0.66666667); 
 
 // current raycast screen coordinate
 uint8_t currentScreenX = 0;
@@ -68,22 +76,22 @@ void loop() {
     unsigned long mathStart = micros();
     #endif
 
-    fixed_q7_8 cameraX = q7_8_div_32b(((int32_t)2 * ((int32_t)currentScreenX << Q7_8_SHIFT)), ((screenWidth - 1)) << Q7_8_SHIFT) - Q7_8_ONE;    
- 
-    fixed_q7_8 rayDirX = dirX + q7_8_mult(planeX, cameraX);
-    fixed_q7_8 rayDirY = dirY + q7_8_mult(planeY, cameraX);
+    Fixed16_16 cameraX = (2 * Fixed16_16(currentScreenX) / Fixed16_16(screenWidth)) - 1;
 
-    int16_t mapX = posX >> Q7_8_SHIFT;
-    int16_t mapY = posY >> Q7_8_SHIFT;
+    Fixed16_16 rayDirX = dirX + (planeX * cameraX);
+    Fixed16_16 rayDirY = dirY + (planeY * cameraX);
 
+    int16_t mapX = posX.toInt();
+    int16_t mapY = posY.toInt();
 
     // DDA setup
     
-    fixed_q7_8 deltaDistX = (rayDirX == 0) ? Q7_8_MAX : abs(q7_8_div_abs(Q7_8_ONE, rayDirX));
-    fixed_q7_8 deltaDistY = (rayDirY == 0) ? Q7_8_MAX : abs(q7_8_div_abs(Q7_8_ONE, rayDirY));
-    
-    fixed_q7_8 sideDistX;
-    fixed_q7_8 sideDistY;
+    Fixed16_16 deltaDistX = (rayDirX == 0) ? Fixed16_16::fromRaw(INT32_MAX) : abs(1 / rayDirX);
+    Fixed16_16 deltaDistY = (rayDirY == 0) ? Fixed16_16::fromRaw(INT32_MAX) : abs(1 / rayDirY);
+
+
+    Fixed16_16 sideDistX;
+    Fixed16_16 sideDistY;
     
     // dda step direction
     int8_t stepX;
@@ -95,17 +103,17 @@ void loop() {
     // sidedist is the distance to get to an int coordinate on the map after which we will start DDA with deltadist in step direction
     if (rayDirX < 0) {
         stepX = -1;
-        sideDistX = q7_8_mult((posX - (mapX << Q7_8_SHIFT)), deltaDistX);
+        sideDistX = (posX - mapX) * deltaDistX;
     } else {
         stepX = 1;
-        sideDistX = q7_8_mult((((mapX + 1) << Q7_8_SHIFT) - posX), deltaDistX);
+        sideDistX = (mapX + 1 - posX) * deltaDistX;
     }
     if (rayDirY < 0) {
         stepY = -1;
-        sideDistY = q7_8_mult((posY - (mapY << Q7_8_SHIFT)), deltaDistY);
+        sideDistY = (posY - mapY) * deltaDistY;
     } else {
         stepY = 1;
-        sideDistY = q7_8_mult((((mapY + 1) << Q7_8_SHIFT) - posY), deltaDistY);
+        sideDistY = (mapY + 1 - posY) * deltaDistY;
     }
 
     uint8_t outOfBounds = 0;
@@ -131,7 +139,8 @@ void loop() {
         }
     }
 
-    fixed_q7_8 perpwallDist;
+    // fixed_q7_8 perpwallDist;
+    Fixed16_16 perpwallDist;
     // this is same as calculating ((mapX - posX + (1 - stepX) / 2) / rayDirX) but can be simplified due to scaling of sidedist and deltadist by raydir magnitude
     if (side == 0) {
         perpwallDist = sideDistX - deltaDistX;
@@ -140,11 +149,12 @@ void loop() {
     }
 
     if (perpwallDist == 0) perpwallDist = 1; // avoid division by zero 
-    if (outOfBounds) perpwallDist = Q7_8_MAX; // if out of bounds, set very far distance
+    if (outOfBounds) perpwallDist = INT32_MAX; // if out of bounds, set very far distance
 
     // drawing the actual raycaster line
     // height of the screen is 128, which is the max we can hold in a fixed16_8
-    uint8_t lineHeight = q7_8_div(Q7_8_MAX, perpwallDist) >> Q7_8_SHIFT;
+    // uint8_t lineHeight = q7_8_div(Q7_8_MAX, perpwallDist) >> Q7_8_SHIFT;
+    uint8_t lineHeight = (screenHeight / perpwallDist).toInt();
 
     uint8_t lineStart = (-lineHeight / 2) + (screenHeight / 2);
     if (lineStart < 0) lineStart = 0; 
@@ -169,44 +179,45 @@ void loop() {
     Serial.println(gfxEnd - gfxStart);
     #endif
 
+    
     if (millis() - lastMoveTime > moveDelay) {
         lastMoveTime = millis();
 
         if (digitalRead(BTN_FWRD) == HIGH) {
-            if (worldMap[(posX + q7_8_mult(dirX, moveStep)) >> Q7_8_SHIFT][posY >> Q7_8_SHIFT] == 0) {
-                posX += q7_8_mult(dirX, moveStep);
+            if (worldMap[(posX + dirX * moveStep).toInt()][posY.toInt()] == 0) {
+                posX += dirX * moveStep;
             }
-            if (worldMap[posX >> Q7_8_SHIFT][(posY + q7_8_mult(dirY, moveStep)) >> Q7_8_SHIFT] == 0) {
-                posY += q7_8_mult(dirY, moveStep);
+            if (worldMap[posX.toInt()][(posY + dirY * moveStep).toInt()] == 0) {
+                posY += dirY * moveStep;
             }
 
         } else if (digitalRead(BTN_BWRD) == HIGH) {
-            if (worldMap[(posX - q7_8_mult(dirX, moveStep)) >> Q7_8_SHIFT][posY >> Q7_8_SHIFT] == 0) {
-                posX -= q7_8_mult(dirX, moveStep);
+            if (worldMap[(posX - dirX * moveStep).toInt()][posY.toInt()] == 0) {
+                posX -= dirX * moveStep;
             }
-            if (worldMap[posX >> Q7_8_SHIFT][(posY - q7_8_mult(dirY, moveStep)) >> Q7_8_SHIFT] == 0) {
-                posY -= q7_8_mult(dirY, moveStep);
+            if (worldMap[posX.toInt()][(posY - dirY * moveStep).toInt()] == 0) {
+                posY -= dirY * moveStep;
             }
         }
         
         if (digitalRead(BTN_LFT) == HIGH) {
-            int16_t oldDirX = dirX;
-            int16_t oldDirY = dirY;
+            // int16_t oldDirX = dirX;
+            // int16_t oldDirY = dirY;
 
-            // Perform rotation using 32-bit integers to prevent overflow
-            int32_t temp_dir_x = ((int32_t)oldDirX * rocos) - ((int32_t)oldDirY * rosin);
-            int32_t temp_dir_y = ((int32_t)oldDirX * rosin) + ((int32_t)oldDirY * rocos);
+            // // Perform rotation using 32-bit integers to prevent overflow
+            // int32_t temp_dir_x = ((int32_t)oldDirX * rocos) - ((int32_t)oldDirY * rosin);
+            // int32_t temp_dir_y = ((int32_t)oldDirX * rosin) + ((int32_t)oldDirY * rocos);
 
-            // Scale the 32-bit result back down to Q7.8 (16-bit) format
-            dirX = (fixed_q7_8)(temp_dir_x >> Q7_8_SHIFT);
-            dirY = (fixed_q7_8)(temp_dir_y >> Q7_8_SHIFT);
+            // // Scale the 32-bit result back down to Q7.8 (16-bit) format
+            // dirX = (fixed_q7_8)(temp_dir_x >> Q7_8_SHIFT);
+            // dirY = (fixed_q7_8)(temp_dir_y >> Q7_8_SHIFT);
 
-            // --- Rotate Camera Plane Vector ---
+            // // --- Rotate Camera Plane Vector ---
             
-            const fixed_q7_8 FOV_SCALE = 166; // double_to_q7_8(0.66)
+            // const fixed_q7_8 FOV_SCALE = 166; // double_to_q7_8(0.66)
 
-            planeX = q7_8_mult(-dirY, FOV_SCALE);
-            planeY = q7_8_mult(dirX, FOV_SCALE);
+            // planeX = q7_8_mult(-dirY, FOV_SCALE);
+            // planeY = q7_8_mult(dirX, FOV_SCALE);
 
             // --- Normalize BOTH Vectors ---
             
