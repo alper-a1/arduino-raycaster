@@ -13,8 +13,8 @@
 using fixed_q7_8 = int16_t;
 constexpr uint8_t Q7_8_SHIFT = 8;
 constexpr fixed_q7_8 Q7_8_ONE = (1 << Q7_8_SHIFT); 
-constexpr fixed_q7_8 Q7_8_MAX = 32767; // 127.99609375
-constexpr fixed_q7_8 Q7_8_MIN = -32768; // -128
+constexpr fixed_q7_8 Q7_8_MAX = 32767;  //  127.99609375
+constexpr fixed_q7_8 Q7_8_MIN = -32768; // -128.00000000
 
 // PROGMEM this ?
 constexpr uint8_t sinTable[] = {0, 4, 9, 13, 18, 22, 27, 31, 35, 40, 44, 49, 53, 57, 62, 66, 70, 75, 79, 83, 87, 91, 96, 100, 104, 108, 112, 116, 120, 124, 127, 131, 135, 139, 143, 146, 150, 153, 157, 160, 164, 167, 171, 174, 177, 180, 183, 186, 190, 192, 195, 198, 201, 204, 206, 209, 211, 214, 216, 219, 221, 223, 225, 227, 229, 231, 233, 235, 236, 238, 240, 241, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 253, 254, 254, 254, 255, 255, 255, 255};
@@ -45,7 +45,7 @@ inline fixed_q7_8 sin_q7_8(fixed_q7_8 angleDeg) {
     }
 
     // Lookup the value and apply the sign
-    return (sinTable[lookupIndex] * sign) << Q7_8_SHIFT;
+    return (sinTable[lookupIndex] * sign);
 }
 
 inline fixed_q7_8 cos_q7_8(fixed_q7_8 angleDeg) {
@@ -93,8 +93,60 @@ inline fixed_q7_8 q7_8_div_abs(fixed_q7_8 a, fixed_q7_8 b) {
     return (fixed_q7_8)result;
 }
 
+// compile time conversion ONLY
 inline fixed_q7_8 double_to_q7_8(double val) {
     return (fixed_q7_8)(val * Q7_8_ONE);
 }
+
+
+/*
+    OTHER MATH FUNCTIONS
+*/
+
+// integer square root for 16 bit numbers, returns floor(sqrt(n))
+// from https://en.wikipedia.org/wiki/Square_root_algorithms#Binary_numeral_system_(base_2)
+inline uint32_t isqrt_32(uint32_t n) {
+    if (n < 2) {
+        return n;
+    }
+
+    uint32_t root = 0;
+    uint32_t bit = (uint32_t)1 << 30;
+
+    // Find the largest power of 4 (bit pair) <= n
+    while (bit > n) {
+        bit >>= 2;
+    }
+
+    // Perform the bit-by-bit calculation
+    while (bit != 0) {
+        if (n >= root + bit) {
+            n -= root + bit;
+            root = (root >> 1) + bit; 
+        } else {
+            root >>= 1; 
+        }
+        
+        bit >>= 2; // Move to the next lower bit pair
+    }
+    
+    return root; 
+}
+
+inline void normalise_2d_q7_8(fixed_q7_8 *x, fixed_q7_8 *y) {
+
+    int32_t magSq = ((int32_t)(*x) * (*x)) + ((int32_t)(*y) * (*y));
+    if (magSq == 0) return;
+
+    // sqrt of a q14.16 number, result is q7.8
+    fixed_q7_8 mag = (fixed_q7_8)isqrt_32((uint32_t)magSq);
+    
+    if (mag == 0) return;
+
+    *x = q7_8_div(*x, mag);
+    *y = q7_8_div(*y, mag);
+}
+
+
 
 #endif

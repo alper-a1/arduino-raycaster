@@ -5,17 +5,20 @@
 
 #include <fixedpoint.h>
 
+// #define PROFILING
+
+
 // tft screen init
 constexpr uint8_t TFT_CS = 10, TFT_DC = 8, TFT_RST = 9;
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
 
+
 // movement buttons init:
-constexpr uint8_t BTN_FWRD = 6, BTN_BWRD = 7;
+constexpr uint8_t BTN_FWRD = 6, BTN_BWRD = 7, BTN_LFT = 4, BTN_RGHT = 5;
 
 void setup() {
     Serial.begin(9600);
-    Serial.print("Hello! ST7735 TFT Test");
-    // tft.initB()
+
     tft.initR(INITR_GREENTAB);
     tft.fillScreen(ST7735_BLACK); 
     tft.setRotation(1); // landscape mode
@@ -39,6 +42,14 @@ constexpr uint8_t worldMap[10][10] =
 
 fixed_q7_8 posX = 4 << Q7_8_SHIFT;
 fixed_q7_8 posY = 4 << Q7_8_SHIFT;  
+// movement & rotation
+const fixed_q7_8 moveStep = double_to_q7_8(0.05);
+constexpr uint8_t moveDelay = 50; // ms
+unsigned long lastMoveTime = 0;
+
+constexpr uint8_t rotStepDeg = 255;
+const fixed_q7_8 rosin = 4;
+const fixed_q7_8 rocos = 256;
 
 fixed_q7_8 dirX = -1 << Q7_8_SHIFT; 
 fixed_q7_8 dirY = 0 << Q7_8_SHIFT;
@@ -46,14 +57,19 @@ fixed_q7_8 dirY = 0 << Q7_8_SHIFT;
 fixed_q7_8 planeX = 0;
 fixed_q7_8 planeY = double_to_q7_8(0.66);
 
+// current raycast screen coordinate
 uint8_t currentScreenX = 0;
-void loop() {
-    fixed_q7_8 cameraX = q7_8_div_32b(((int32_t)2 * ((int32_t)currentScreenX << Q7_8_SHIFT)), ((screenWidth - 1)) << Q7_8_SHIFT) - Q7_8_ONE;    
-    // Serial.println("x: ");
-    // Serial.println(currentScreenX);
-    // Serial.println("cameraX: ");
-    // Serial.println(cameraX);
 
+#ifdef PROFILING
+unsigned long start = micros();
+#endif
+void loop() {
+    #ifdef PROFILING
+    unsigned long mathStart = micros();
+    #endif
+
+    fixed_q7_8 cameraX = q7_8_div_32b(((int32_t)2 * ((int32_t)currentScreenX << Q7_8_SHIFT)), ((screenWidth - 1)) << Q7_8_SHIFT) - Q7_8_ONE;    
+ 
     fixed_q7_8 rayDirX = dirX + q7_8_mult(planeX, cameraX);
     fixed_q7_8 rayDirY = dirY + q7_8_mult(planeY, cameraX);
 
@@ -128,47 +144,107 @@ void loop() {
 
     // drawing the actual raycaster line
     // height of the screen is 128, which is the max we can hold in a fixed16_8
-    int16_t lineHeight = q7_8_div(Q7_8_MAX, perpwallDist) >> Q7_8_SHIFT;
+    uint8_t lineHeight = q7_8_div(Q7_8_MAX, perpwallDist) >> Q7_8_SHIFT;
 
-    int16_t lineStart = (-lineHeight / 2) + (screenHeight / 2);
+    uint8_t lineStart = (-lineHeight / 2) + (screenHeight / 2);
     if (lineStart < 0) lineStart = 0; 
-    // uint8_t lineEnd = (lineHeight >> 1) + (screenHeight >> 1);
-    // if (lineEnd >= screenHeight) lineEnd = screenHeight - 1;
+
+    #ifdef PROFILING
+    unsigned long mathEnd = micros();
+    Serial.print("Math time (us): ");
+    Serial.println(mathEnd - mathStart);
+
+    unsigned long gfxStart = micros();
+    #endif
+
     uint16_t color = (side == 0) ? ST7735_GREEN : ST7735_BLUE;
     tft.drawFastVLine(currentScreenX, 0, lineStart, ST7735_BLACK);
     tft.drawFastVLine(currentScreenX, lineStart, lineHeight, color);
     tft.drawFastVLine(currentScreenX, lineStart + lineHeight, screenHeight - (lineStart + lineHeight), ST7735_BLACK);
 
-    if (digitalRead(BTN_FWRD) == HIGH) {
-        fixed_q7_8 moveStep = double_to_q7_8(0.05);
-        if (worldMap[(posX + q7_8_mult(dirX, moveStep)) >> Q7_8_SHIFT][posY >> Q7_8_SHIFT] == 0) {
-            posX += q7_8_mult(dirX, moveStep);
+
+    #ifdef PROFILING
+    unsigned long gfxEnd = micros();
+    Serial.print("Graphics time (us): ");
+    Serial.println(gfxEnd - gfxStart);
+    #endif
+
+    if (millis() - lastMoveTime > moveDelay) {
+        lastMoveTime = millis();
+
+        if (digitalRead(BTN_FWRD) == HIGH) {
+            if (worldMap[(posX + q7_8_mult(dirX, moveStep)) >> Q7_8_SHIFT][posY >> Q7_8_SHIFT] == 0) {
+                posX += q7_8_mult(dirX, moveStep);
+            }
+            if (worldMap[posX >> Q7_8_SHIFT][(posY + q7_8_mult(dirY, moveStep)) >> Q7_8_SHIFT] == 0) {
+                posY += q7_8_mult(dirY, moveStep);
+            }
+
+        } else if (digitalRead(BTN_BWRD) == HIGH) {
+            if (worldMap[(posX - q7_8_mult(dirX, moveStep)) >> Q7_8_SHIFT][posY >> Q7_8_SHIFT] == 0) {
+                posX -= q7_8_mult(dirX, moveStep);
+            }
+            if (worldMap[posX >> Q7_8_SHIFT][(posY - q7_8_mult(dirY, moveStep)) >> Q7_8_SHIFT] == 0) {
+                posY -= q7_8_mult(dirY, moveStep);
+            }
         }
-        if (worldMap[posX >> Q7_8_SHIFT][(posY + q7_8_mult(dirY, moveStep)) >> Q7_8_SHIFT] == 0) {
-            posY += q7_8_mult(dirY, moveStep);
-        }
-        // fixed_q7_8 oldDirX = dirX;
-        // dirX = q7_8_mult(oldDirX, cos_q7_8(-Q7_8_ONE)) - q7_8_mult(dirY, sin_q7_8(-Q7_8_ONE));
-        // dirY = q7_8_mult(oldDirX, sin_q7_8(-Q7_8_ONE)) + q7_8_mult(dirY, cos_q7_8(-Q7_8_ONE));
-        // fixed_q7_8 oldPlaneX = planeX;
-        // planeX = q7_8_mult(planeX, cos_q7_8(-Q7_8_ONE)) - q7_8_mult(planeY, sin_q7_8(-Q7_8_ONE));
-        // planeY = q7_8_mult(oldPlaneX, sin_q7_8(-Q7_8_ONE)) + q7_8_mult(planeY, cos_q7_8(-Q7_8_ONE));        
-    
-    } else if (digitalRead(BTN_BWRD) == HIGH) {
-        fixed_q7_8 moveStep = double_to_q7_8(0.05);
-        if (worldMap[(posX - q7_8_mult(dirX, moveStep)) >> Q7_8_SHIFT][posY >> Q7_8_SHIFT] == 0) {
-            posX -= q7_8_mult(dirX, moveStep);
-        }
-        if (worldMap[posX >> Q7_8_SHIFT][(posY - q7_8_mult(dirY, moveStep)) >> Q7_8_SHIFT] == 0) {
-            posY -= q7_8_mult(dirY, moveStep);
+        
+        if (digitalRead(BTN_LFT) == HIGH) {
+            int16_t oldDirX = dirX;
+            int16_t oldDirY = dirY;
+
+            // Perform rotation using 32-bit integers to prevent overflow
+            int32_t temp_dir_x = ((int32_t)oldDirX * rocos) - ((int32_t)oldDirY * rosin);
+            int32_t temp_dir_y = ((int32_t)oldDirX * rosin) + ((int32_t)oldDirY * rocos);
+
+            // Scale the 32-bit result back down to Q7.8 (16-bit) format
+            dirX = (fixed_q7_8)(temp_dir_x >> Q7_8_SHIFT);
+            dirY = (fixed_q7_8)(temp_dir_y >> Q7_8_SHIFT);
+
+            // --- Rotate Camera Plane Vector ---
+            
+            const fixed_q7_8 FOV_SCALE = 166; // double_to_q7_8(0.66)
+
+            planeX = q7_8_mult(-dirY, FOV_SCALE);
+            planeY = q7_8_mult(dirX, FOV_SCALE);
+
+            // --- Normalize BOTH Vectors ---
+            
+            // This step is crucial to prevent long-term degradation.
+            // The bug might be in this function if the rotation code above is correct.
+            // normalise_2d_q7_8(&dirX, &dirY);
+        } else if (digitalRead(BTN_RGHT) == HIGH) {
+            // int16_t oldDirX = dirX;
+            // int16_t oldDirY = dirY;
+
+            // // Perform rotation using 32-bit integers to prevent overflow
+            // int32_t temp_dir_x = ((int32_t)oldDirX * -rocos) - ((int32_t)oldDirY * -rosin);
+            // int32_t temp_dir_y = ((int32_t)oldDirX * -rosin) + ((int32_t)oldDirY * -rocos);
+
+            // // Scale the 32-bit result back down to Q7.8 (16-bit) format
+            // dirX = (fixed_q7_8)(temp_dir_x >> Q7_8_SHIFT);
+            // dirY = (fixed_q7_8)(temp_dir_y >> Q7_8_SHIFT);
+
+            // // --- Rotate Camera Plane Vector ---
+            
+            // const fixed_q7_8 FOV_SCALE = 166; // double_to_q7_8(0.66)
+
+            // planeX = q7_8_mult(-dirY, FOV_SCALE);
+            // planeY = q7_8_mult(dirX, FOV_SCALE);
         }
     }
-
-
+    
 
     currentScreenX++;
     if (currentScreenX >= screenWidth) {
         currentScreenX = 0;
+
+        #ifdef PROFILING
+        unsigned long end = micros();
+        Serial.print("Frame time (us): ");
+        Serial.println(end - start);
+        start = end;
+        #endif
     }
 }
 
