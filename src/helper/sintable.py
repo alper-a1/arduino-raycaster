@@ -1,18 +1,17 @@
 import math
 
-
-
-# calculate and generate a uint8_t sin table for degrees 0-90
+# calculate and generate a uint16_t sin table for degrees 0-90
 # we are using degrees here as its easier than storing radians in fixed16_8_t
 sintable = []
 
 for d in range(91):
     rad = math.radians(d)
     
-    q7_8_sin_val = int(round(math.sin(rad) * 255))
+    q7_8_sin_val = int(round(math.sin(rad) * 65536))
     
     sintable.append(q7_8_sin_val)
     
+sintable[-1] -= 1 # so we can fit sin vals inside uint16_t
 
 cpp_sin_table = "constexpr uint16_t sin[] = {"
 
