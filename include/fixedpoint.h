@@ -1,7 +1,12 @@
 /*
-    Fixed Point Number implementation
-    using 16 bit ints with 8 fractional bits (-128 to 127.99609375) 
-
+    Fixed16_16 (Q15.16 Format)
+    --------------------------
+    Storage:    int32_t (Signed)
+    Resolution: ~0.0000152 (1/65536)
+    Range:      [-32768.0, +32767.99998]
+    
+    NOTE: Division rounds toward zero (truncation).
+    NOTE: Double constructor does NOT clamp overflow.
 */
    
 #ifndef FIXEDPOINT_H
@@ -9,52 +14,6 @@
    
 #include <Arduino.h>
    
-// integer square root for 16 bit numbers, returns floor(sqrt(n))
-// from https://en.wikipedia.org/wiki/Square_root_algorithms#Binary_numeral_system_(base_2)
-inline uint32_t isqrt_32(uint32_t n) {
-    if (n < 2) {
-        return n;
-    }
-
-    uint32_t root = 0;
-    uint32_t bit = (uint32_t)1 << 30;
-
-    // Find the largest power of 4 (bit pair) <= n
-    while (bit > n) {
-        bit >>= 2;
-    }
-
-    // Perform the bit-by-bit calculation
-    while (bit != 0) {
-        if (n >= root + bit) {
-            n -= root + bit;
-            root = (root >> 1) + bit; 
-        } else {
-            root >>= 1; 
-        }
-        
-        bit >>= 2; // Move to the next lower bit pair
-    }
-    
-    return root; 
-}
-
-// inline void normalise_2d_q7_8(fixed_q7_8 *x, fixed_q7_8 *y) {
-
-//     int32_t magSq = ((int32_t)(*x) * (*x)) + ((int32_t)(*y) * (*y));
-//     if (magSq == 0) return;
-
-//     // sqrt of a q14.16 number, result is q7.8
-//     fixed_q7_8 mag = (fixed_q7_8)isqrt_32((uint32_t)magSq);
-    
-//     if (mag == 0) return;
-
-//     *x = q7_8_div(*x, mag);
-//     *y = q7_8_div(*y, mag);
-// }
-
-
-// fixedpoint class implementation to clean up code
 class Fixed16_16 {
 
     private:
@@ -62,7 +21,7 @@ class Fixed16_16 {
         static constexpr uint8_t FRAC_SHIFT = 16;
         static constexpr int32_t ONE = ((int32_t)1 << FRAC_SHIFT); 
         
-        // from raw (pre scaled) 
+        // from raw (pre scaled) -- bool in argument so compiler isnt confused on which constructor to use 
         constexpr explicit Fixed16_16(const int32_t raw, bool) : value(raw) {} 
 
         // constexpr compatible round for compile time double conversion
@@ -76,10 +35,10 @@ class Fixed16_16 {
         Fixed16_16(const Fixed16_16&) = default;
         Fixed16_16& operator=(const Fixed16_16&) = default;
 
-        // from double !-- USE COMPILE TIME ONLY --!
+        // from double !-- COMPILE TIME USE ONLY --!
         constexpr Fixed16_16(const double dVal) : value(static_cast<int32_t>(constexpr_round(dVal * ONE))) {} 
         
-        // can overflow - care
+        // can overflow - care that iVal is <= INT16_MAX
         constexpr explicit Fixed16_16(int iVal) : value(static_cast<int32_t>(iVal) << FRAC_SHIFT) {} 
         
         static constexpr Fixed16_16 fromRaw(const int32_t raw) {
@@ -97,27 +56,27 @@ class Fixed16_16 {
         /* operator overloads */ 
 
 
-        friend bool operator==(const Fixed16_16 &a, const Fixed16_16 &b);
-        friend bool operator<(const Fixed16_16 &a, const Fixed16_16 &b);
+        friend bool operator==(const Fixed16_16 a, const Fixed16_16 b);
+        friend bool operator<(const Fixed16_16 a, const Fixed16_16 b);
 
-        inline Fixed16_16& operator+=(const Fixed16_16 &other) {
+        inline Fixed16_16& operator+=(const Fixed16_16 other) {
             value += other.value;
             return *this;
         }
 
-        inline Fixed16_16& operator-=(const Fixed16_16 &other) {
+        inline Fixed16_16& operator-=(const Fixed16_16 other) {
             value -= other.value;
             return *this;
         }
         
-        inline Fixed16_16& operator*=(const Fixed16_16 &other) {
+        inline Fixed16_16& operator*=(const Fixed16_16 other) {
             value = (static_cast<int64_t>(value) * other.value) >> FRAC_SHIFT;
             return *this;
         }
 
-        inline Fixed16_16& operator/=(const Fixed16_16 &other) {
+        inline Fixed16_16& operator/=(const Fixed16_16 other) {
             if (other == 0) {
-                value = INT32_MAX; // avoid division by zero, set to max value
+                value = (value >= 0) ? INT32_MAX : INT32_MIN; // avoid division by zero, set to max value
                 return *this;
             }
 
@@ -130,49 +89,50 @@ class Fixed16_16 {
         }
 };
 
+
 // math operators for fixed point class
 
 
-inline Fixed16_16 operator+(const Fixed16_16 &a, const Fixed16_16 &b) {
+inline Fixed16_16 operator+(const Fixed16_16 a, const Fixed16_16 b) {
     return Fixed16_16(a) += b;
 }
 
-inline Fixed16_16 operator-(const Fixed16_16 &a, const Fixed16_16 &b) {
+inline Fixed16_16 operator-(const Fixed16_16 a, const Fixed16_16 b) {
     return Fixed16_16(a) -= b;
 }
 
-inline Fixed16_16 operator*(const Fixed16_16 &a, const Fixed16_16 &b) {
+inline Fixed16_16 operator*(const Fixed16_16 a, const Fixed16_16 b) {
     return Fixed16_16(a) *= b;
 }
 
-inline Fixed16_16 operator/(const Fixed16_16 &a, const Fixed16_16 &b) {
+inline Fixed16_16 operator/(const Fixed16_16 a, const Fixed16_16 b) {
     return Fixed16_16(a) /= b;
 }
 
 // comparison operators for fixed point class
 
 
-inline bool operator==(const Fixed16_16 &a, const Fixed16_16 &b) {
+inline bool operator==(const Fixed16_16 a, const Fixed16_16 b) {
     return a.value == b.value;
 }
 
-inline bool operator!=(const Fixed16_16 &a, const Fixed16_16 &b) {
+inline bool operator!=(const Fixed16_16 a, const Fixed16_16 b) {
     return !(a == b);
 }
 
-inline bool operator<(const Fixed16_16 &a, const Fixed16_16 &b) {
+inline bool operator<(const Fixed16_16 a, const Fixed16_16 b) {
     return a.value < b.value;
 }
 
-inline bool operator>(const Fixed16_16 &a, const Fixed16_16 &b) {
+inline bool operator>(const Fixed16_16 a, const Fixed16_16 b) {
     return b < a;
 }
 
-inline bool operator>=(const Fixed16_16 &a, const Fixed16_16 &b) {
+inline bool operator>=(const Fixed16_16 a, const Fixed16_16 b) {
     return !(a < b);
 }
 
-inline bool operator<=(const Fixed16_16 &a, const Fixed16_16 &b) {
+inline bool operator<=(const Fixed16_16 a, const Fixed16_16 b) {
     return !(a > b);
 }
 
@@ -181,38 +141,38 @@ inline bool operator<=(const Fixed16_16 &a, const Fixed16_16 &b) {
 
 // boring int16 / fixedpoint overloads
 
-inline Fixed16_16 operator+(const Fixed16_16 &a, const int16_t b) {
+inline Fixed16_16 operator+(const Fixed16_16 a, const int16_t b) {
     return a + Fixed16_16(b);
 }
 
-inline Fixed16_16 operator+(const int16_t a, const Fixed16_16 &b) {
+inline Fixed16_16 operator+(const int16_t a, const Fixed16_16 b) {
     return Fixed16_16(a) + b;
 }
 
-inline Fixed16_16 operator-(const Fixed16_16 &a, const int16_t b) {
+inline Fixed16_16 operator-(const Fixed16_16 a, const int16_t b) {
     return a - Fixed16_16(b);
 }
 
-inline Fixed16_16 operator-(const int16_t a, const Fixed16_16 &b) {
+inline Fixed16_16 operator-(const int16_t a, const Fixed16_16 b) {
     return Fixed16_16(a) - b;
 }
 
-inline Fixed16_16 operator*(const Fixed16_16 &a, const int16_t b) {
-    return a * Fixed16_16(b);
-}
-
-inline Fixed16_16 operator*(const int16_t a, const Fixed16_16 &b) {
-    return Fixed16_16(a) * b;
-}
-
-inline Fixed16_16 operator/(const Fixed16_16 &a, const int16_t b) {
+inline Fixed16_16 operator/(const Fixed16_16 a, const int16_t b) {
     return a / Fixed16_16(b);
 }
 
-inline Fixed16_16 operator/(const int16_t a, const Fixed16_16 &b) {
+inline Fixed16_16 operator/(const int16_t a, const Fixed16_16 b) {
     return Fixed16_16(a) / b;
 }
 
+// minor optimisation for multiplication, assuming overflow-safe values, we can skip the casting of b into a Fixed Point, saving cycles of multiplication / division by Fixed16_16 ONE
+inline Fixed16_16 operator*(const Fixed16_16 a, const int16_t b) {
+    return Fixed16_16::fromRaw(a.toRaw() * b);
+}
+
+inline Fixed16_16 operator*(const int16_t a, const Fixed16_16 b) {
+    return Fixed16_16::fromRaw(a * b.toRaw());
+}
 
 
 
