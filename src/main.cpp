@@ -5,7 +5,7 @@
 
 #include <fixedpoint.h>
 
-// #define PROFILING
+#define PROFILING
 
 
 // tft screen init
@@ -22,11 +22,6 @@ void setup() {
     tft.initR(INITR_GREENTAB);
     tft.fillScreen(ST7735_BLACK); 
     tft.setRotation(1); // landscape mode
-
-
-    Fixed16_16 pl(0.66666667); 
-    Serial.print("PlaneY: "); Serial.println(pl.toRaw());
-
 }
 
 constexpr uint8_t screenWidth = 160;
@@ -220,13 +215,6 @@ void loop() {
     currentScreenX++;
     if (currentScreenX >= screenWidth) {
         currentScreenX = 0;
-
-        #ifdef PROFILING
-        unsigned long end = micros();
-        Serial.print("Frame time (us): ");
-        Serial.println(end - start);
-        start = end;
-        #endif
     }
 }
 
